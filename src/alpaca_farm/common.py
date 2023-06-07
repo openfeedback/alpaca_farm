@@ -31,6 +31,10 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
 from transformers.trainer import WEIGHTS_NAME, is_deepspeed_zero3_enabled
 
+from superhf.mocking import MockLanguageModel
+
+# from reward_modelling.reward_model import RewardModel
+
 from . import constants, logging, utils
 from .types import AnyPath, AnyPathOrNone
 
@@ -106,7 +110,8 @@ def make_generative_lm(
 
     if flash_attn and not fp16 and not bf16:
         logger.warning(
-            "Flash attention does not support fp32. Reverting to standard attention.", main_process_only=True
+            "Flash attention does not support fp32. Reverting to standard attention.",
+            main_process_only=True,
         )
         flash_attn = False
 
@@ -131,10 +136,11 @@ def let_model_save_mem_when_zero_grad(model: nn.Module):
         """
         if getattr(self, "_is_replica", False):
             warnings.warn(
-                "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
-                "The parameters are copied (in a differentiable manner) from the original module. "
-                "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
-                "If you need gradients in your forward method, consider using autograd.grad instead."
+                "Calling .zero_grad() from a module created with nn.DataParallel() has"
+                " no effect. The parameters are copied (in a differentiable manner)"
+                " from the original module. This means they are not leaf nodes in"
+                " autograd and so don't accumulate gradients. If you need gradients in"
+                " your forward method, consider using autograd.grad instead."
             )
 
         for p in self.parameters():
@@ -187,7 +193,10 @@ def safe_save_model_for_hf_trainer(
             if trainer.args.should_save:
                 file = os.path.join(output_dir, WEIGHTS_NAME)
                 if os.path.isfile(file):
-                    logger.warning(f"deepspeed zero3: removing {file}, see zero_to_fp32.py to recover weights")
+                    logger.warning(
+                        f"deepspeed zero3: removing {file}, see zero_to_fp32.py to"
+                        " recover weights"
+                    )
                     os.remove(file)
 
             # now save the real model if stage3_gather_16bit_weights_on_model_save=True
@@ -196,8 +205,8 @@ def safe_save_model_for_hf_trainer(
             if not trainer.deepspeed.save_16bit_model(output_dir, WEIGHTS_NAME):
                 logger.warning(
                     "deepspeed.save_16bit_model didn't save the model, since"
-                    " stage3_gather_16bit_weights_on_model_save=false. Saving the full checkpoint instead, use"
-                    " zero_to_fp32.py to recover weights"
+                    " stage3_gather_16bit_weights_on_model_save=false. Saving the full"
+                    " checkpoint instead, use zero_to_fp32.py to recover weights"
                 )
                 trainer.deepspeed.save_checkpoint(output_dir)
                 # --- End of shameless copy ---
@@ -207,7 +216,8 @@ def safe_save_model_for_hf_trainer(
                 if trainer.args.should_save:
                     try:
                         os.system(
-                            f"python {output_dir}/zero_to_fp32.py  '{output_dir}' '{output_dir}/pytorch_model.bin'"
+                            f"python {output_dir}/zero_to_fp32.py  '{output_dir}'"
+                            f" '{output_dir}/pytorch_model.bin'"
                         )
                     except Exception as e:
                         logger.fatal(f"Failed to convert zero3 checkpoint to fp32: {e}")
@@ -248,7 +258,9 @@ def flatten_dict(nested, sep=".", postprocess_fn=lambda *args: args):
     return flat
 
 
-def unpack_dict(d: Dict, keys: Sequence[str], return_type: type = tuple) -> Union[Sequence, Dict]:
+def unpack_dict(
+    d: Dict, keys: Sequence[str], return_type: type = tuple
+) -> Union[Sequence, Dict]:
     if return_type in (tuple, list):
         return return_type(d[key] for key in keys)
     elif return_type == dict:
@@ -273,7 +285,9 @@ def model_name_or_path_exists(model_name_or_path: AnyPath) -> bool:
 
 
 # TODO(lxuechen): Simplify this logic.
-def get_pretrained_model_name_with_model_name_or_path(model_name_or_path: AnyPathOrNone) -> Optional[str]:
+def get_pretrained_model_name_with_model_name_or_path(
+    model_name_or_path: AnyPathOrNone,
+) -> Optional[str]:
     """Get the name of the pretrained model with a model name or path.
 
     Examples:
@@ -296,18 +310,27 @@ def get_pretrained_model_name_with_model_name_or_path(model_name_or_path: AnyPat
     # chain. This works by recursively extracting the name/path to the parent model from the `config.json` file, until
     # we get a non-path name.
     while os.path.isdir(pretrained_model_name):
-        pretrained_model_name = utils.jload(os.path.join(pretrained_model_name, "config.json"))["_name_or_path"]
+        pretrained_model_name = utils.jload(
+            os.path.join(pretrained_model_name, "config.json")
+        )["_name_or_path"]
 
     # When recursive finding doesn't work, we revert to the dumb hardcoded rule. This only supports llama models so far.
     if pretrained_model_name not in constants.MODEL_NAME_TO_FAMILY:
         logger.warning(
-            "One of the `_name_or_path` to the root node is not a pretrained model name or local path on disk. "
-            "This may be due to copying checkpoints across machines. "
-            "Falling back to hardcoded rule to figure out the pretrained model based on config.json."
+            "One of the `_name_or_path` to the root node is not a pretrained model name"
+            " or local path on disk. This may be due to copying checkpoints across"
+            " machines. Falling back to hardcoded rule to figure out the pretrained"
+            " model based on config.json."
         )
         config = utils.jload(os.path.join(model_name_or_path, "config.json"))
-        model_config = unpack_dict(config, keys=("model_type", "num_hidden_layers", "hidden_size"), return_type=dict)
-        pretrained_model_name = [k for k, v in constants.MODEL_NAME_TO_CONFIG.items() if v == model_config][0]
+        model_config = unpack_dict(
+            config,
+            keys=("model_type", "num_hidden_layers", "hidden_size"),
+            return_type=dict,
+        )
+        pretrained_model_name = [
+            k for k, v in constants.MODEL_NAME_TO_CONFIG.items() if v == model_config
+        ][0]
 
     return str(pretrained_model_name)
 
@@ -355,7 +378,12 @@ def get_transformer_hidden_size(model: transformers.PreTrainedModel):
     else:
         # Hack to deal with the fact that transformers library changed the LLaMA model name.
         llama_cls = getattr(
-            transformers, "LLaMAForCausalLM" if hasattr(transformers, "LLaMAForCausalLM") else "LlamaForCausalLM"
+            transformers,
+            (
+                "LLaMAForCausalLM"
+                if hasattr(transformers, "LLaMAForCausalLM")
+                else "LlamaForCausalLM"
+            ),
         )
         if isinstance(model, llama_cls):
             hidden_size_attr_name = "hidden_size"
@@ -365,9 +393,13 @@ def get_transformer_hidden_size(model: transformers.PreTrainedModel):
     return getattr(model.config, hidden_size_attr_name)
 
 
-def prepare_inputs(data: Union[torch.Tensor, Any], device: Union[str, int, torch.device]) -> Union[torch.Tensor, Any]:
+def prepare_inputs(
+    data: Union[torch.Tensor, Any], device: Union[str, int, torch.device]
+) -> Union[torch.Tensor, Any]:
     if isinstance(data, Mapping):
-        return type(data)({k: prepare_inputs(v, device) for k, v in data.items()})  # noqa
+        return type(data)(
+            {k: prepare_inputs(v, device) for k, v in data.items()}
+        )  # noqa
     elif isinstance(data, (tuple, list)):
         return type(data)(prepare_inputs(v, device) for v in data)
     elif isinstance(data, torch.Tensor):
@@ -375,22 +407,30 @@ def prepare_inputs(data: Union[torch.Tensor, Any], device: Union[str, int, torch
     return data
 
 
-def cast_with_native_amp(func: Callable, mixed_precision: Optional[str] = None) -> Callable:
+def cast_with_native_amp(
+    func: Callable, mixed_precision: Optional[str] = None
+) -> Callable:
     """Almost like how huggingface accelerate cast `model.forward`."""
     if mixed_precision not in ("fp16", "bf16"):
-        logger.warning(f"Unknown mixed precision mode: {mixed_precision}, falling back to fp32.")
+        logger.warning(
+            f"Unknown mixed precision mode: {mixed_precision}, falling back to fp32."
+        )
         return func
 
     if mixed_precision == "fp16" and is_torch_version(">=", "1.10"):
         output_func = torch.cuda.amp.autocast(dtype=torch.float16)(func)
     else:
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        output_func = torch.autocast(device_type=device_type, dtype=torch.bfloat16)(func)
+        output_func = torch.autocast(device_type=device_type, dtype=torch.bfloat16)(
+            func
+        )
     output_func = convert_outputs_to_fp32(output_func)
     return output_func
 
 
-def prepare_model_for_custom_fn(model: nn.Module, fn_name: str, accelerator: accelerate.Accelerator) -> nn.Module:
+def prepare_model_for_custom_fn(
+    model: nn.Module, fn_name: str, accelerator: accelerate.Accelerator
+) -> nn.Module:
     """Wrap a custom function of a model with the right mixed precision context.
 
     This function should be run on *raw* model, i.e., before wrapped into DDP or FSDP.
@@ -402,6 +442,8 @@ def prepare_model_for_custom_fn(model: nn.Module, fn_name: str, accelerator: acc
         setattr(model, original_fn_name, original_fn)
 
         # New set function.
-        wrapped_fn = cast_with_native_amp(original_fn, mixed_precision=accelerator.mixed_precision)
+        wrapped_fn = cast_with_native_amp(
+            original_fn, mixed_precision=accelerator.mixed_precision
+        )
         setattr(model, fn_name, wrapped_fn)
     return model

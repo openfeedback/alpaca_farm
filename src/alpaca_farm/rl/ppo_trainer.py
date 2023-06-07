@@ -27,6 +27,8 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from transformers.modeling_utils import unwrap_model
 
+from superhf.mocking import MockLanguageModel, MockRewardModel
+
 from .. import (
     accelerate_patch,
     common,
@@ -516,6 +518,8 @@ def make_models(
     accelerator: accelerate.Accelerator,
 ) -> dict:
     def make_generative_policy():
+        if args.policy_model_name_or_path == "mock":
+            return MockLanguageModel()
         base_model = common.make_generative_lm(
             model_name_or_path=args.policy_model_name_or_path,
             flash_attn=args.flash_attn,
@@ -528,6 +532,8 @@ def make_models(
         return base_model
 
     def make_reward_model():
+        if args.reward_model_name_or_path == "mock":
+            return MockRewardModel()
         return reward_model_module.RewardModel.from_pretrained(
             args.reward_model_name_or_path,
             flash_attn=args.flash_attn,

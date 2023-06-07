@@ -21,11 +21,21 @@ import torch
 import tqdm
 import transformers
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullStateDictConfig
-from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    FullyShardedDataParallel as FSDP,
+)
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from transformers.modeling_utils import unwrap_model
 
-from .. import accelerate_patch, common, constants, data_preprocessor, logging, torch_ops, utils
+from .. import (
+    accelerate_patch,
+    common,
+    constants,
+    data_preprocessor,
+    logging,
+    torch_ops,
+    utils,
+)
 from ..models import reward_model as reward_model_module
 from ..models import rl_models
 from ..types import AnyPath, AnyPathOrNone, LRScheduler, Tensor
@@ -74,7 +84,9 @@ class PPOTrainer(rl_trainer.RLTrainer):
         # This introduces a small index off by one bug if pad_token_id == eos_token_id.
         terminal_positions = (responses != self.tokenizer.pad_token_id).sum(dim=1) - 1
         shaped_rewards[list(range(rewards.size(0))), terminal_positions] += rewards
-        return dict(shaped_rewards=shaped_rewards, non_score_rewards=non_score_rewards, kl=kl)
+        return dict(
+            shaped_rewards=shaped_rewards, non_score_rewards=non_score_rewards, kl=kl
+        )
 
     def _estimate_advantage(self, rewards: Tensor, values: Tensor) -> Dict[str, Tensor]:
         """Generalized advantage estimation.
@@ -118,7 +130,9 @@ class PPOTrainer(rl_trainer.RLTrainer):
         #  recall one sets mixed precision options with accelerator.
         # The precise value of this arg doesn't matter here, since we use the unwrapped model only for respond.
         # Generally, try to use the wrapped model as much as you can, since it's got the autocast/cast-back wrappers.
-        unwrapped_policy = self.accelerator.unwrap_model(self.policy, keep_fp32_wrapper=True)
+        unwrapped_policy = self.accelerator.unwrap_model(
+            self.policy, keep_fp32_wrapper=True
+        )
 
         self.ref_policy.eval()
         self.reward_model.eval()
@@ -134,39 +148,59 @@ class PPOTrainer(rl_trainer.RLTrainer):
                 common.prepare_inputs(batch, device=self.accelerator.device),
                 keys=("queries", "query_attn_masks"),
             )
-            respond_outputs = unwrapped_policy.respond(queries, query_attn_masks, temperature=self.args.temperature)
+            respond_outputs = unwrapped_policy.respond(
+                queries, query_attn_masks, temperature=self.args.temperature
+            )
             (responses,) = common.unpack_dict(respond_outputs, ("responses",))
 
             # Evaluate logprobs of the samples.
-            rollouts_batch = {"queries": queries, "query_attn_masks": query_attn_masks, "responses": responses}
-            policy_outputs = self.policy(**rollouts_batch, temperature=self.args.temperature)
-            ref_policy_outputs = self.ref_policy(**rollouts_batch, temperature=self.args.temperature)
+            rollouts_batch = {
+                "queries": queries,
+                "query_attn_masks": query_attn_masks,
+                "responses": responses,
+            }
+            policy_outputs = self.policy(
+                **rollouts_batch, temperature=self.args.temperature
+            )
+            ref_policy_outputs = self.ref_policy(
+                **rollouts_batch, temperature=self.args.temperature
+            )
             policy_outputs = common.unpack_dict(
-                policy_outputs, keys=("logprobs", "values", "entropies"), return_type=dict
+                policy_outputs,
+                keys=("logprobs", "values", "entropies"),
+                return_type=dict,
             )
             ref_policy_outputs = common.unpack_dict(
                 ref_policy_outputs, keys=("logprobs", "entropies"), return_type=dict
             )
             rollouts_batch.update(policy_outputs)
-            rollouts_batch.update({f"ref_{key}": value for key, value in ref_policy_outputs.items()})
+            rollouts_batch.update(
+                {f"ref_{key}": value for key, value in ref_policy_outputs.items()}
+            )
 
             # Evaluate reward of the samples.
             text_queries, text_responses = tuple(
-                self.tokenizer.batch_decode(tensor, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+                self.tokenizer.batch_decode(
+                    tensor, skip_special_tokens=True, clean_up_tokenization_spaces=True
+                )
                 for tensor in (queries, responses)
             )
             del queries, responses  # Prevent mistakes.
 
             # We retokenizer, since policy and reward model might not have the same tokenizer.
             # TODO(lxuechen): Avoid retokenization when policy and reward tokenizer are the same.
-            text_sequences = [q + r for q, r in utils.zip_(text_queries, text_responses)]
+            text_sequences = [
+                q + r for q, r in utils.zip_(text_queries, text_responses)
+            ]
             # TODO(lxuechen): This response retokenization has issues with OPT, since the tokenizer always prepend
             #  <bos_token>. But the issue is local to post_reward, which isn't an issue if we don't penalize.
             sequences, responses = tuple(
                 self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
                 for text in (text_sequences, text_responses)
             )
-            sequences, responses = common.prepare_inputs((sequences, responses), device=self.accelerator.device)
+            sequences, responses = common.prepare_inputs(
+                (sequences, responses), device=self.accelerator.device
+            )
 
             reward_outputs = self.reward_model(**sequences)
             reward_outputs = self.post_reward(reward_outputs, responses.input_ids)
@@ -181,7 +215,9 @@ class PPOTrainer(rl_trainer.RLTrainer):
             )
             rollouts_batch.update(shape_reward_outputs)
 
-            rollouts_batch_cpu = {key: value.cpu() for key, value in rollouts_batch.items()}
+            rollouts_batch_cpu = {
+                key: value.cpu() for key, value in rollouts_batch.items()
+            }
             rollouts.append(rollouts_batch_cpu)
 
         # Items in dict need to be of same shape.
@@ -194,7 +230,9 @@ class PPOTrainer(rl_trainer.RLTrainer):
         advantages = {key: value.cpu() for key, value in advantages.items()}
         return {**rollouts, **advantages}
 
-    def post_reward(self, reward_outputs: Dict[str, Tensor], responses: Tensor) -> Dict[str, Tensor]:
+    def post_reward(
+        self, reward_outputs: Dict[str, Tensor], responses: Tensor
+    ) -> Dict[str, Tensor]:
         """Assign bad reward values to sequences which didn't stop properly."""
         if self.args.truncate_token_ids is None:
             return reward_outputs
@@ -216,21 +254,44 @@ class PPOTrainer(rl_trainer.RLTrainer):
                     )
             return torch.tensor(validity_mask, device=sequences.device)
 
-        validity_masks = [get_validity_mask(responses, end_token_id) for end_token_id in self.args.truncate_token_ids]
-        validity_mask = torch.stack(validity_masks).any(dim=0)  # Sequence is valid if it ends with any end token.
+        validity_masks = [
+            get_validity_mask(responses, end_token_id)
+            for end_token_id in self.args.truncate_token_ids
+        ]
+        validity_mask = torch.stack(validity_masks).any(
+            dim=0
+        )  # Sequence is valid if it ends with any end token.
         rewards = reward_outputs["rewards"]
         rewards[~validity_mask] = self.args.penalty_reward_value
         return reward_outputs
 
     def compute_loss(self, rollouts: Dict[str, Tensor]) -> Tuple[Tensor, Dict]:
-        values, old_logprob, returns, advantages, queries, query_attn_masks, responses = common.prepare_inputs(
+        (
+            values,
+            old_logprob,
+            returns,
+            advantages,
+            queries,
+            query_attn_masks,
+            responses,
+        ) = common.prepare_inputs(
             common.unpack_dict(
                 rollouts,
-                keys=("values", "logprobs", "returns", "advantages", "queries", "query_attn_masks", "responses"),
+                keys=(
+                    "values",
+                    "logprobs",
+                    "returns",
+                    "advantages",
+                    "queries",
+                    "query_attn_masks",
+                    "responses",
+                ),
             ),
             device=self.accelerator.device,
         )
-        outputs = self.policy(queries, query_attn_masks, responses, temperature=self.args.temperature)
+        outputs = self.policy(
+            queries, query_attn_masks, responses, temperature=self.args.temperature
+        )
 
         vpred = outputs["values"]
         vpredclipped = torch.clamp(
@@ -247,9 +308,13 @@ class PPOTrainer(rl_trainer.RLTrainer):
         ratio = torch.exp(logprob - old_logprob)
         # When current policy is close to the old policy, the KL component of this advantage is approximately correct.
         pg_losses = -advantages * ratio
-        pg_losses2 = -advantages * torch.clamp(ratio, min=1.0 - self.args.cliprange, max=1.0 + self.args.cliprange)
+        pg_losses2 = -advantages * torch.clamp(
+            ratio, min=1.0 - self.args.cliprange, max=1.0 + self.args.cliprange
+        )
         pg_loss = torch.maximum(pg_losses, pg_losses2).mean()
-        pg_clipfrac = (pg_losses2 > pg_losses).to(torch.get_default_dtype()).mean()  # noqa
+        pg_clipfrac = (
+            (pg_losses2 > pg_losses).to(torch.get_default_dtype()).mean()
+        )  # noqa
 
         loss = pg_loss + self.args.vf_coef * vf_loss
 
@@ -271,7 +336,9 @@ class PPOTrainer(rl_trainer.RLTrainer):
                 var=value_var,
             ),
         )
-        return loss, common.flatten_dict(stats, sep="/", postprocess_fn=lambda x: x.detach())
+        return loss, common.flatten_dict(
+            stats, sep="/", postprocess_fn=lambda x: x.detach()
+        )
 
     def record_step_stats(self, train_stats, rollouts, step_idx, **kwargs):
         kl = rollouts["kl"]
@@ -292,25 +359,42 @@ class PPOTrainer(rl_trainer.RLTrainer):
         }
         for k, v in train_stats.items():
             stats[f"ppo/{k}"] = v.mean(dim=0)
-        stats = {key: value.item() if torch.is_tensor(value) else value for key, value in stats.items()}
+        stats = {
+            key: value.item() if torch.is_tensor(value) else value
+            for key, value in stats.items()
+        }
         if self.accelerator.is_main_process:
             self.accelerator.log(stats, step=step_idx)
             if self.args.output_dir is not None:
                 # Store rollout data to disk to debug.
                 rollouts_to_disk = {
                     key: self.tokenizer.batch_decode(
-                        tensor, skip_special_tokens=False, clean_up_tokenization_spaces=False
+                        tensor,
+                        skip_special_tokens=False,
+                        clean_up_tokenization_spaces=False,
                     )
                     for key, tensor in common.unpack_dict(
                         rollouts, keys=("queries", "responses"), return_type=dict
                     ).items()
                 }
-                rollouts_to_disk = pd.DataFrame(rollouts_to_disk).to_dict(orient="records")
-                utils.jdump(rollouts_to_disk, utils.join(self.args.output_dir, "rollouts", f"step_{step_idx}.json"))
+                rollouts_to_disk = pd.DataFrame(rollouts_to_disk).to_dict(
+                    orient="records"
+                )
+                utils.jdump(
+                    rollouts_to_disk,
+                    utils.join(
+                        self.args.output_dir, "rollouts", f"step_{step_idx}.json"
+                    ),
+                )
         return stats
 
     @torch.inference_mode()
-    def save_model(self, output_dir: Optional[str] = None, give_rw_access=True, check_corrupted=True):
+    def save_model(
+        self,
+        output_dir: Optional[str] = None,
+        give_rw_access=True,
+        check_corrupted=True,
+    ):
         # We don't use accelerator here because, we want to be frugal and only store the policy.
         # Moreover, we want easy loadability -- calling .from_pretrained on the folder. Full dump wouldn't allow this.
 
@@ -324,7 +408,9 @@ class PPOTrainer(rl_trainer.RLTrainer):
 
         model, tokenizer = self.policy, self.tokenizer
         with FSDP.state_dict_type(
-            model, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+            model,
+            StateDictType.FULL_STATE_DICT,
+            FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
         ):
             logger.warning("Gathering full state_dict...")
             state_dict = model.state_dict()
@@ -340,8 +426,12 @@ class PPOTrainer(rl_trainer.RLTrainer):
             state_dict = new_state_dict
 
             if check_corrupted:  # Let the checks run on GPU.
-                is_corrupted = any(value.isnan().any().item() for value in state_dict.values())
-                logger.warning(f"Is there nans in the state_dict to be dumped? {is_corrupted}")
+                is_corrupted = any(
+                    value.isnan().any().item() for value in state_dict.values()
+                )
+                logger.warning(
+                    f"Is there nans in the state_dict to be dumped? {is_corrupted}"
+                )
 
             cpu_state_dict = {key: value.cpu() for key, value in state_dict.items()}
             del state_dict
@@ -349,23 +439,35 @@ class PPOTrainer(rl_trainer.RLTrainer):
             unwrapped = unwrap_model(model).policy.base_model
             assert isinstance(
                 unwrapped, (transformers.OPTForCausalLM, transformers.LlamaForCausalLM)
-            ), f"Expected to save a generative policy, but found model to be of type: {type(unwrapped)}."
+            ), (
+                "Expected to save a generative policy, but found model to be of type:"
+                f" {type(unwrapped)}."
+            )
             if hasattr(unwrapped, "_keys_to_ignore_on_save"):
-                logger.warning(f"keys to ignore on save: {unwrapped._keys_to_ignore_on_save}")
+                logger.warning(
+                    f"keys to ignore on save: {unwrapped._keys_to_ignore_on_save}"
+                )
             logger.warning(f"Saving model checkpoint to {output_dir}")
-            logger.warning(f"Saving {len(cpu_state_dict)} keys:\n{utils.jdumps(cpu_state_dict.keys())}")
+            logger.warning(
+                "Saving"
+                f" {len(cpu_state_dict)} keys:\n{utils.jdumps(cpu_state_dict.keys())}"
+            )
             unwrapped.save_pretrained(output_dir, state_dict=cpu_state_dict)
 
             tokenizer.save_pretrained(output_dir)
 
             # Good practice: save your training arguments together with the trained model
-            torch.save(self.args, os.path.join(output_dir, constants.TRAINING_ARGS_NAME))
+            torch.save(
+                self.args, os.path.join(output_dir, constants.TRAINING_ARGS_NAME)
+            )
 
             if give_rw_access:
                 try:
                     os.system(f"chmod -R a+xwr {output_dir}")
                 except Exception as e:
-                    logger.fatal(f"Failed to give read-write access to {output_dir}: {e}")
+                    logger.fatal(
+                        f"Failed to give read-write access to {output_dir}: {e}"
+                    )
 
 
 def _make_left_padded_tokenizer(
@@ -373,6 +475,9 @@ def _make_left_padded_tokenizer(
     cache_dir: AnyPathOrNone = constants.DEFAULT_CACHE_DIR,
     **kwargs,
 ) -> transformers.PreTrainedTokenizer:
+    if model_name_or_path == "mock":
+        model_name_or_path = "gpt2"
+        print("Using mock tokenizer, which is gpt2 tokenizer.")
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_name_or_path,
         cache_dir=cache_dir,
@@ -387,14 +492,21 @@ def _make_left_padded_tokenizer(
 def make_tokenizer(args):
     # policy_tokenizer left pads, since the policy requires batch decoding.
     policy_tokenizer = _make_left_padded_tokenizer(
-        args.policy_model_name_or_path, cache_dir=args.cache_dir, use_fast=args.use_fast_tokenizer
+        args.policy_model_name_or_path,
+        cache_dir=args.cache_dir,
+        use_fast=args.use_fast_tokenizer,
     )
     # reward_tokenizer left pads, since we need the embedding of the right most non-pad token.
     reward_tokenizer = _make_left_padded_tokenizer(
-        args.reward_model_name_or_path, cache_dir=args.cache_dir, use_fast=args.use_fast_tokenizer
+        args.reward_model_name_or_path,
+        cache_dir=args.cache_dir,
+        use_fast=args.use_fast_tokenizer,
     )
     if policy_tokenizer.get_vocab() != reward_tokenizer.get_vocab():
-        raise ValueError("AlpacaFarm does not support different tokenizer for policy and reward models.")
+        raise ValueError(
+            "AlpacaFarm does not support different tokenizer for policy and reward"
+            " models."
+        )
     return policy_tokenizer
 
 
@@ -430,23 +542,33 @@ def make_models(
     # Especially so for multiple processes on single node, each starting off with a copy of the model.
     # General strategy is to 1) create a model, 2) move it to target device / shard it, 3) then start next model,
     # as opposed to creating all needed models on CPU first, and separately moving / sharding each.
-    policy = rl_models.make_policy_with_base_model(args, make_generative_policy(), tokenizer)
+    policy = rl_models.make_policy_with_base_model(
+        args, make_generative_policy(), tokenizer
+    )
     if args.init_value_with_reward:
         # Initialize value from reward model a la OAI.
         logger.warning("Initializing value model with reward model.")
-        value_model = rl_models.make_value_with_base_model(args, make_reward_model().backbone_model, tokenizer)
+        value_model = rl_models.make_value_with_base_model(
+            args, make_reward_model().backbone_model, tokenizer
+        )
     else:
         logger.warning("Initializing value model with policy model.")
         # Initialize value from policy. Works for sanity, but generally performs worse in instruction-following.
-        value_model = rl_models.make_value_with_base_model(args, make_generative_policy(), tokenizer)
+        value_model = rl_models.make_value_with_base_model(
+            args, make_generative_policy(), tokenizer
+        )
     actor_critic = rl_models.ActorCritic(policy=policy, value_model=value_model)
     # We cast how respond should run. It's important the dtypes be consistent with training, since a bf16
     # fine-tuned model might not work with fp16 inference.
     # Cast step below must precede accelerator.prepare(), since wrapped model might not have `respond` method.
-    actor_critic = common.prepare_model_for_custom_fn(model=actor_critic, fn_name="respond", accelerator=accelerator)
+    actor_critic = common.prepare_model_for_custom_fn(
+        model=actor_critic, fn_name="respond", accelerator=accelerator
+    )
     actor_critic = accelerator.prepare(actor_critic)  # noqa
 
-    ref_policy = rl_models.make_policy_with_base_model(args, make_generative_policy(), tokenizer)
+    ref_policy = rl_models.make_policy_with_base_model(
+        args, make_generative_policy(), tokenizer
+    )
     ref_policy.requires_grad_(False)
     ref_policy = accelerator.prepare(ref_policy)  # noqa
 

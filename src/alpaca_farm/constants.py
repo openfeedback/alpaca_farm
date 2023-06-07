@@ -50,6 +50,7 @@ MODEL_NAME_TO_FAMILY = {
     "EleutherAI/pythia-2.8b-deduped": "pythia",
     "EleutherAI/pythia-6.9b-deduped": "pythia",
     "EleutherAI/pythia-12b-deduped": "pythia",
+    "peterchatain/mock_llama": "llama",
 }
 
 # Huggingface model naming convention.

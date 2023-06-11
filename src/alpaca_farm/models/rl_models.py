@@ -114,6 +114,10 @@ class AutoregressivePolicy(Policy):
     ) -> Dict[str, Tensor]:
         if temperature is None:
             temperature = self.args.temperature
+        # if using cpu, we need to set synced_gpus=False
+        synced_gpus = True
+        if self.base_model.device.type == 'cpu':
+            synced_gpus = False
         sequences = self.base_model.generate(
             inputs=queries,
             attention_mask=query_attn_masks,
@@ -124,7 +128,7 @@ class AutoregressivePolicy(Policy):
             top_k=0,
             temperature=temperature,
             num_return_sequences=num_return_sequences,
-            synced_gpus=True,
+            synced_gpus=synced_gpus,
         )
         responses = torch_ops.right_pad(
             sequences[:, queries.size(1) :],

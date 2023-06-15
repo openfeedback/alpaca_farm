@@ -79,7 +79,7 @@ class AutoregressivePolicy(Policy):
         query_attn_masks: Tensor,
         responses: Tensor,
         temperature: Optional[float] = None,
-        # use_base_model: Optional[bool] = None,
+        use_base_model: Optional[bool] = None,
     ) -> Dict[str, Tensor]:
         # TODO(lxuechen): Refactor attention mask. Here query_attn_masks overrides padding-based attention mask.
         if temperature is None:
@@ -93,7 +93,7 @@ class AutoregressivePolicy(Policy):
             attention_mask=attention_mask,
             use_cache=False,
         )
-        if self.is_base_policy:
+        if use_base_model is not None and use_base_model:
             with self.base_model.disable_adapter(), torch.no_grad():
                 outputs = self.base_model(**inputs, output_hidden_states=True)
         else:
@@ -194,9 +194,10 @@ class ActorCritic(nn.Module):
         query_attn_masks: Tensor,
         responses: Tensor,
         temperature: Optional[float] = None,
+        use_base_model: bool = False,
     ) -> Dict[str, Tensor]:
         # Assume the policy and value model share the same tokenizer.
-        o1 = self.policy(queries, query_attn_masks, responses, temperature)
+        o1 = self.policy(queries, query_attn_masks, responses, temperature, use_base_model=use_base_model)
         o2 = self.value_model(queries, query_attn_masks, responses)
         return {**o1, **o2}
 

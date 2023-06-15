@@ -134,8 +134,8 @@ class PPOTrainer(rl_trainer.RLTrainer):
         # The precise value of this arg doesn't matter here, since we use the unwrapped model only for respond.
         # Generally, try to use the wrapped model as much as you can, since it's got the autocast/cast-back wrappers.
         unwrapped_policy = self.accelerator.unwrap_model(self.policy, keep_fp32_wrapper=True)
-
-        self.ref_policy.eval()
+        if self.ref_policy is not None:
+            self.ref_policy.eval()
         self.reward_model.eval()
 
         rollouts = []
@@ -161,9 +161,15 @@ class PPOTrainer(rl_trainer.RLTrainer):
                 "responses": responses,
             }
             policy_outputs = self.policy(**rollouts_batch, temperature=self.args.temperature)
-            ref_policy_outputs = self.ref_policy(
-                **rollouts_batch, temperature=self.args.temperature
-            )
+            if self.ref_policy is not None:
+                ref_policy_outputs = self.ref_policy(
+                    **rollouts_batch, temperature=self.args.temperature
+                )
+            else:
+                ref_policy_outputs = self.policy(
+                    **rollouts_batch, temperature=self.args.temperature,
+                    use_base_model=True
+                )
             policy_outputs = common.unpack_dict(
                 policy_outputs,
                 keys=("logprobs", "values", "entropies"),
@@ -567,9 +573,11 @@ def make_models(
     actor_critic = accelerator.prepare(actor_critic)  # noqa
 
     if args.lora_r > 0:
-        ref_policy = rl_models.AutoregressivePolicy(args, policy.base_model, tokenizer, is_base_policy=True)
-        ref_policy.requires_grad_(False)
-        ref_policy = accelerator.prepare(ref_policy)
+        ref_policy = None
+
+        # ref_policy = rl_models.AutoregressivePolicy(args, policy.base_model, tokenizer, is_base_policy=True)
+        # ref_policy.requires_grad_(False)
+        # ref_policy = accelerator.prepare(ref_policy)
 
         # make ref policy simply call existing policy except without lora weights
         # ref_policy = rl_models.AutoregressivePolicy(None, None, None)

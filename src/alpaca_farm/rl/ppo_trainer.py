@@ -576,7 +576,7 @@ def make_models(
     else:
         ref_policy = rl_models.make_policy_with_base_model(args, make_generative_policy(), tokenizer)
         ref_policy.requires_grad_(False)
-        ref_policy = accelerator.prepare(ref_policy)  # noqa
+    ref_policy = accelerator.prepare(ref_policy)  # noqa
 
     reward_model = make_reward_model()
     reward_model.requires_grad_(False)

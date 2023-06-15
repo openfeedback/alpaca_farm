@@ -33,12 +33,14 @@ logger = logging.get_logger(__name__)
 
 class Policy(nn.Module, abc.ABC):
     def __init__(
-        self, args, base_model: transformers.PreTrainedModel, base_tokenizer: transformers.PreTrainedTokenizer
+        self, args, base_model: transformers.PreTrainedModel, base_tokenizer: transformers.PreTrainedTokenizer,
+        is_base_policy: bool = False,
     ):
         super().__init__()
         self.args = args
         self.base_model = base_model
         self.base_tokenizer = base_tokenizer
+        self.is_base_policy = is_base_policy
 
     @abc.abstractmethod
     def forward(
@@ -77,7 +79,7 @@ class AutoregressivePolicy(Policy):
         query_attn_masks: Tensor,
         responses: Tensor,
         temperature: Optional[float] = None,
-        use_base_model: Optional[bool] = None,
+        # use_base_model: Optional[bool] = None,
     ) -> Dict[str, Tensor]:
         # TODO(lxuechen): Refactor attention mask. Here query_attn_masks overrides padding-based attention mask.
         if temperature is None:
@@ -91,7 +93,7 @@ class AutoregressivePolicy(Policy):
             attention_mask=attention_mask,
             use_cache=False,
         )
-        if use_base_model is not None and use_base_model:
+        if self.is_base_policy:
             with self.base_model.disable_adapter(), torch.no_grad():
                 outputs = self.base_model(**inputs, output_hidden_states=True)
         else:

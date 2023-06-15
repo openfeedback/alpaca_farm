@@ -155,12 +155,8 @@ class PPOTrainer(rl_trainer.RLTrainer):
             print(f"After unpacking, query_attn_masks.device: {query_attn_masks.device}")
             print(f"type is {type(self.policy)}")
             print(f"self.policy.base_model.device: {self.policy.policy.base_model.device}")
-                        # Verify rollouts_batch and self.policy.base_model are same device
-            # assert rollouts_batch["queries"].device == self.policy.base_model.device
-            # print(f"rollouts_batch['queries'].device: {rollouts_batch['queries'].device}")
-            # print(f"self.policy.base_model.device: {self.policy.base_model.device}")
-            # print(f"rollouts_batch['query_attn_masks'].device: {rollouts_batch['query_attn_masks'].device}")
-            # print(f"rollouts_batch['responses'].device: {rollouts_batch['responses'].device}")
+            for i in self.policy.policy.base_model.named_parameters():
+                print(f"{i[0]} -> {i[1].device}")
             respond_outputs = unwrapped_policy.respond(
                 queries, query_attn_masks, temperature=self.args.temperature
             )

@@ -77,6 +77,7 @@ class AutoregressivePolicy(Policy):
         query_attn_masks: Tensor,
         responses: Tensor,
         temperature: Optional[float] = None,
+        use_base_model: Optional[bool] = None,
     ) -> Dict[str, Tensor]:
         # TODO(lxuechen): Refactor attention mask. Here query_attn_masks overrides padding-based attention mask.
         if temperature is None:
@@ -90,7 +91,12 @@ class AutoregressivePolicy(Policy):
             attention_mask=attention_mask,
             use_cache=False,
         )
-        outputs = self.base_model(**inputs, output_hidden_states=True)
+        if use_base_model is not None and use_base_model:
+            with self.base_model.disable_adapter(), torch.no_grad():
+                outputs = self.base_model(**inputs, output_hidden_states=True)
+        else:
+            outputs = self.base_model(**inputs, output_hidden_states=True)
+        # outputs = self.base_model(**inputs, output_hidden_states=True)
         original_logits = outputs.logits[:, -self.args.response_len - 1 : -1]
         logits = original_logits / temperature
         labels = input_ids[:, -self.args.response_len :]

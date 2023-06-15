@@ -570,10 +570,10 @@ def make_models(
         # make ref policy simply call existing policy except without lora weights
         ref_policy = rl_models.AutoregressivePolicy(None, None, None)
         ref_policy.__dict__ = policy.__dict__.copy()
-        def ref_policy_forward(self, *args, **kwargs):
-            with self.base_model.disable_adapter(), torch.no_grad():
-                return policy.forward(*args, **kwargs)
-        ref_policy.forward = types.MethodType(ref_policy_forward, ref_policy)
+        # def ref_policy_forward(self, *args, **kwargs):
+        #     with self.base_model.disable_adapter(), torch.no_grad():
+        #         return policy.forward(*args, **kwargs)
+        ref_policy.forward = lambda *args, **kwargs: policy.forward(*args, use_base_model=True, **kwargs)
     else:
         ref_policy = rl_models.make_policy_with_base_model(args, make_generative_policy(), tokenizer)
         ref_policy.requires_grad_(False)

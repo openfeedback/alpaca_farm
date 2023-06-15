@@ -145,10 +145,21 @@ class PPOTrainer(rl_trainer.RLTrainer):
             desc="rollout",
         ):
             # Sample rollouts.
+            print(f"Accelerate thinks device is {self.accelerator.device}")
+            print(f"batch['queries'].device: {batch['queries'].device}")
             queries, query_attn_masks = common.unpack_dict(
                 common.prepare_inputs(batch, device=self.accelerator.device),
                 keys=("queries", "query_attn_masks"),
             )
+            print(f"After unpacking, queries.device: {queries.device}")
+            print(f"After unpacking, query_attn_masks.device: {query_attn_masks.device}")
+            print(f"self.policy.base_model.device: {self.policy.base_model.device}")
+                        # Verify rollouts_batch and self.policy.base_model are same device
+            # assert rollouts_batch["queries"].device == self.policy.base_model.device
+            # print(f"rollouts_batch['queries'].device: {rollouts_batch['queries'].device}")
+            # print(f"self.policy.base_model.device: {self.policy.base_model.device}")
+            # print(f"rollouts_batch['query_attn_masks'].device: {rollouts_batch['query_attn_masks'].device}")
+            # print(f"rollouts_batch['responses'].device: {rollouts_batch['responses'].device}")
             respond_outputs = unwrapped_policy.respond(
                 queries, query_attn_masks, temperature=self.args.temperature
             )
@@ -160,12 +171,6 @@ class PPOTrainer(rl_trainer.RLTrainer):
                 "query_attn_masks": query_attn_masks,
                 "responses": responses,
             }
-            # Verify rollouts_batch and self.policy.base_model are same device
-            assert rollouts_batch["queries"].device == self.policy.base_model.device
-            print(f"rollouts_batch['queries'].device: {rollouts_batch['queries'].device}")
-            print(f"self.policy.base_model.device: {self.policy.base_model.device}")
-            print(f"rollouts_batch['query_attn_masks'].device: {rollouts_batch['query_attn_masks'].device}")
-            print(f"rollouts_batch['responses'].device: {rollouts_batch['responses'].device}")
             policy_outputs = self.policy(**rollouts_batch, temperature=self.args.temperature)
             if self.ref_policy is not None:
                 ref_policy_outputs = self.ref_policy(

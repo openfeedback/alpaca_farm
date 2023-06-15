@@ -153,7 +153,8 @@ class PPOTrainer(rl_trainer.RLTrainer):
             )
             print(f"After unpacking, queries.device: {queries.device}")
             print(f"After unpacking, query_attn_masks.device: {query_attn_masks.device}")
-            print(f"self.policy.base_model.device: {self.policy.base_model.device}")
+            print(f"type is {type(self.policy)}")
+            print(f"self.policy.base_model.device: {self.policy.policy.base_model.device}")
                         # Verify rollouts_batch and self.policy.base_model are same device
             # assert rollouts_batch["queries"].device == self.policy.base_model.device
             # print(f"rollouts_batch['queries'].device: {rollouts_batch['queries'].device}")

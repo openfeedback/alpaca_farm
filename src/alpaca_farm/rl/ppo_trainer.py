@@ -160,6 +160,12 @@ class PPOTrainer(rl_trainer.RLTrainer):
                 "query_attn_masks": query_attn_masks,
                 "responses": responses,
             }
+            # Verify rollouts_batch and self.policy.base_model are same device
+            assert rollouts_batch["queries"].device == self.policy.base_model.device
+            print(f"rollouts_batch['queries'].device: {rollouts_batch['queries'].device}")
+            print(f"self.policy.base_model.device: {self.policy.base_model.device}")
+            print(f"rollouts_batch['query_attn_masks'].device: {rollouts_batch['query_attn_masks'].device}")
+            print(f"rollouts_batch['responses'].device: {rollouts_batch['responses'].device}")
             policy_outputs = self.policy(**rollouts_batch, temperature=self.args.temperature)
             if self.ref_policy is not None:
                 ref_policy_outputs = self.ref_policy(

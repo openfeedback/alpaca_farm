@@ -26,6 +26,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from transformers.modeling_utils import unwrap_model
+from peft import get_peft_model, LoraConfig, TaskType
 
 from superhf.mocking import MockLanguageModel, MockRewardModel
 
@@ -42,6 +43,7 @@ from ..models import reward_model as reward_model_module
 from ..models import rl_models
 from ..types import AnyPath, AnyPathOrNone, LRScheduler, Tensor
 from . import rl_trainer
+from . import ppo_utils
 
 logger = logging.get_logger(__name__)
 
@@ -448,14 +450,21 @@ def _make_left_padded_tokenizer(
     **kwargs,
 ) -> transformers.PreTrainedTokenizer:
     if "mock" in model_name_or_path:
-        model_name_or_path = "gpt2"
-        print("Using mock tokenizer, which is gpt2 tokenizer.")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_name_or_path,
-        cache_dir=cache_dir,
-        padding_side="left",
-        **kwargs,
-    )
+        # model_name_or_path = "hf-internal-testing/llama-tokenizer"
+        model_name_or_path = "peterchatain/mock_llama"
+        print("Using mock tokenizer, which is llama-tokenizer tokenizer.")
+        tokenizer = transformers.LlamaTokenizer.from_pretrained(
+            model_name_or_path,
+            cache_dir=cache_dir,
+            padding_side="left"
+        )
+    else:
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_name_or_path,
+            cache_dir=cache_dir,
+            padding_side="left",
+            **kwargs,
+        )
     if tokenizer.pad_token is None:
         tokenizer.add_special_tokens(dict(pad_token=constants.DEFAULT_PAD_TOKEN))
     return tokenizer
@@ -483,7 +492,7 @@ def make_tokenizer(args):
 
 def make_models(
     tokenizer: transformers.PreTrainedTokenizer,
-    args,
+    args: ppo_utils.TrainingArguments,
     accelerator: accelerate.Accelerator,
 ) -> dict:
     def make_generative_policy():
@@ -491,6 +500,10 @@ def make_models(
             model_name_or_path=args.policy_model_name_or_path,
             flash_attn=args.flash_attn,
             mixed_precision=accelerator.mixed_precision,
+            lora_r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            target_modules=args.target_modules,
             cache_dir=args.cache_dir,
             low_cpu_mem_usage=True,
             device_map={"": accelerator.device},
@@ -522,15 +535,27 @@ def make_models(
     if args.init_value_with_reward:
         # Initialize value from reward model a la OAI.
         logger.warning("Initializing value model with reward model.")
-        value_model = rl_models.make_value_with_base_model(
-            args, make_reward_model().backbone_model, tokenizer
-        )
+        if args.lora_r > 0:
+            logger.warning("LORA not supported with init_value_with_reward yet.")
+            value_model = rl_models.make_value_with_base_model(
+                args, make_reward_model().backbone_model, tokenizer
+            )
+        else:
+            value_model = rl_models.make_value_with_base_model(
+                args, make_reward_model().backbone_model, tokenizer
+            )
     else:
         logger.warning("Initializing value model with policy model.")
         # Initialize value from policy. Works for sanity, but generally performs worse in instruction-following.
-        value_model = rl_models.make_value_with_base_model(
-            args, make_generative_policy(), tokenizer
-        )
+        if args.lora_r > 0:
+            logger.warning("LORA not supported with init_value_with_policy yet due to bug with value model.")
+            value_model = rl_models.make_value_with_base_model(
+                args, make_generative_policy(), tokenizer
+            )
+        else:
+            value_model = rl_models.make_value_with_base_model(
+                args, make_generative_policy(), tokenizer
+            )
     actor_critic = rl_models.ActorCritic(policy=policy, value_model=value_model)
     # We cast how respond should run. It's important the dtypes be consistent with training, since a bf16
     # fine-tuned model might not work with fp16 inference.

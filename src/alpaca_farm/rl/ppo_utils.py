@@ -108,7 +108,11 @@ class TrainingArguments(transformers.TrainingArguments):
             "Fast LLaMA tokenizer forces protobuf downgrade to 3.20.3. "
             "Use fast tokenizer only if you can live with that."
         },
-    )
+    ),
+    lora_r: int = field(default=0, metadata={"help": "The r dimension parameter for LoRA. If R is non-zero, then LoRA is used. Otherwise, we do not use LoRA."})
+    lora_alpha: int = field(default=32, metadata={"help": "The alpha parameter for LoRA. Make sure lora_r is properly set."})
+    lora_dropout: float = field(default=0.05, metadata={"help": "The dropout parameter for LoRA, or 0 to disable dropout."})
+    target_modules: List[str] = field(default_factory=lambda: ["q_proj", "v_proj"], metadata={"help": "The list of modules to apply LoRA to. Default work for Llama. Use just query_key_value for GPT-NeoX."})
 
     def __post_init__(self):
         # Super class' __post_init__ is very complicated; don't do super for now in case mess something up.

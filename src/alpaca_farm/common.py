@@ -30,6 +30,7 @@ from torch.distributed.fsdp import FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
 from transformers.trainer import WEIGHTS_NAME, is_deepspeed_zero3_enabled
+from peft import LoraConfig, PeftConfig, get_peft_model, PeftModel
 
 from . import constants, logging, utils
 from .types import AnyPath, AnyPathOrNone
@@ -97,8 +98,22 @@ def make_generative_lm(
     fp16: Optional[bool] = None,
     bf16: Optional[bool] = None,
     mixed_precision: Optional[str] = None,
+    lora_r: Optional[int] = 0,
+    lora_alpha: Optional[float] = None,
+    lora_dropout: Optional[float] = None,
+    target_modules: Optional[Sequence[str]] = None,
     **kwargs,
 ):
+    """
+    kwargs are passed to the from_pretrained method.
+    """
+    peft_config = None
+    try: # try to load a peft model
+        peft_config = PeftConfig.from_pretrained(model_name_or_path)
+        base_model_path = peft_config.base_model_name_or_path
+    except ValueError:
+        base_model_path = model_name_or_path
+
     if fp16 is None:
         fp16 = mixed_precision == "fp16"
     if bf16 is None:
@@ -118,7 +133,25 @@ def make_generative_lm(
     else:
         model_cls = transformers.LlamaForCausalLM
 
-    return model_cls.from_pretrained(model_name_or_path, **kwargs)
+    language_model = model_cls.from_pretrained(base_model_path, **kwargs)
+
+    if peft_config is not None:
+        logger.warning("Loading a peft model")
+        language_model = PeftModel.from_pretrained(language_model, model_name_or_path)
+    elif lora_r > 0:
+        logger.warning("Creating a LoRA model")
+        lora_config = LoraConfig(
+            r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            target_modules=target_modules,
+            task_type="CAUSAL_LM",
+            fan_in_fan_out=False,
+        )
+        language_model = get_peft_model(language_model, lora_config)
+        language_model.print_trainable_parameters()
+
+    return language_model
 
 
 def let_model_save_mem_when_zero_grad(model: nn.Module):
@@ -381,7 +414,8 @@ def get_transformer_hidden_size(model: transformers.PreTrainedModel):
                 else "LlamaForCausalLM"
             ),
         )
-        if isinstance(model, llama_cls):
+        if isinstance(model, llama_cls) or isinstance(model, PeftModel):
+            # We assume that peft models are Llama models.
             hidden_size_attr_name = "hidden_size"
         else:
             raise ValueError(f"Unknown base_model type: {type(model)}")

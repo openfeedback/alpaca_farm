@@ -83,12 +83,16 @@ def make_rl_data_module(
     tokenizer: transformers.PreTrainedTokenizer,
     data_args,
     training_args,
+    examples_per_dataset=0
 ):
+    """
+    examples_per_dataset: if > 0, only use the first examples_per_dataset examples in each dataset
+    """
     prompt_dict = utils.jload(data_args.prompt_dict_path)
 
     alpaca_instructions = datasets.load_dataset(data_args.dataset_path, data_args.dataset_name)
-    train_df = pd.concat([pd.DataFrame(alpaca_instructions[split]) for split in data_args.train_splits])
-    eval_df = pd.concat([pd.DataFrame(alpaca_instructions[split]) for split in data_args.eval_splits])
+    train_df = pd.concat([pd.DataFrame(alpaca_instructions[split][:examples_per_dataset]) for split in data_args.train_splits])
+    eval_df = pd.concat([pd.DataFrame(alpaca_instructions[split][:examples_per_dataset]) for split in data_args.eval_splits])
 
     train_dataset = QueryResponseDataset(
         df=train_df,

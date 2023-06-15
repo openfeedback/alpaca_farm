@@ -22,6 +22,7 @@ DEFAULT_CACHE_DIR = None
 WANDB_PROJECT = "alpaca_farm"
 
 MODEL_NAME_TO_CONFIG = {
+    # "peterchatain/mock_llama": {"model_type": "llama", "num_hidden_layers": 1, "hidden_size": 1},
     "llama-7b": {"model_type": "llama", "num_hidden_layers": 32, "hidden_size": 4096},
     "llama-13b": {"model_type": "llama", "num_hidden_layers": 40, "hidden_size": 5120},
     "llama-30b": {"model_type": "llama", "num_hidden_layers": 60, "hidden_size": 6656},

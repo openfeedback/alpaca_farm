@@ -145,15 +145,10 @@ class PPOTrainer(rl_trainer.RLTrainer):
             desc="rollout",
         ):
             # Sample rollouts.
-            print(f"Accelerate thinks device is {self.accelerator.device}")
-            print(f"batch['queries'].device: {batch['queries'].device}")
             queries, query_attn_masks = common.unpack_dict(
                 common.prepare_inputs(batch, device=self.accelerator.device),
                 keys=("queries", "query_attn_masks"),
             )
-            print(f"After unpacking, queries.device: {queries.device}")
-            print(f"After unpacking, query_attn_masks.device: {query_attn_masks.device}")
-            print(f"type is {type(self.policy)}")
             print(f"self.policy.base_model.device: {self.policy.policy.base_model.device}")
             for i in self.policy.policy.base_model.named_parameters():
                 print(f"{i[0]} -> {i[1].device}")
@@ -578,7 +573,16 @@ def make_models(
     actor_critic = common.prepare_model_for_custom_fn(
         model=actor_critic, fn_name="respond", accelerator=accelerator
     )
+    print(f"Before accelerate prepare,: {type(actor_critic.policy.base_model)}")
+    for name, param in actor_critic.policy.base_model.named_parameters():
+        print(name, param.device)
     actor_critic = accelerator.prepare(actor_critic)  # noqa
+    print("after")
+    for name, param in actor_critic.policy.base_model.named_parameters():
+        print(name, param.device)
+        if param.device != accelerator.device:
+            print("param not on device")
+            param.data = param.data.to(accelerator.device)
 
     if args.lora_r > 0:
         ref_policy = None

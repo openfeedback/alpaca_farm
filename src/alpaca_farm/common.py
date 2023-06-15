@@ -150,6 +150,9 @@ def make_generative_lm(
         )
         language_model = get_peft_model(language_model, lora_config)
         language_model.print_trainable_parameters()
+        for name, param in language_model.named_parameters():
+            # print device type of later
+            print(name, param.device)
 
     return language_model
 

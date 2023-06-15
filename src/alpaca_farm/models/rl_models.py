@@ -210,6 +210,7 @@ class ActorCritic(nn.Module):
 def make_policy_with_base_model(
     args, base_model: transformers.PreTrainedModel, base_tokenizer: transformers.PreTrainedTokenizer
 ) -> Policy:
+    logger.warning(f"Policy in make_policy_with_base_mode has device {base_model.device}")
     if base_model.config.is_encoder_decoder:
         raise NotImplementedError
     else:

@@ -565,9 +565,18 @@ def make_models(
     )
     actor_critic = accelerator.prepare(actor_critic)  # noqa
 
-    ref_policy = rl_models.make_policy_with_base_model(args, make_generative_policy(), tokenizer)
-    ref_policy.requires_grad_(False)
-    ref_policy = accelerator.prepare(ref_policy)  # noqa
+    if args.lora_r > 0:
+        # make ref policy simply call existing policy except without lora weights
+        ref_policy = rl_models.AutoregressivePolicy(None, None, None)
+        ref_policy.__dict__ = policy.__dict__.copy()
+        def ref_policy_forward(*args, **kwargs):
+            with policy.base_model.disable_adapter(), torch.no_grad():
+                return policy(*args, **kwargs)
+        ref_policy.forward = ref_policy_forward
+    else:
+        ref_policy = rl_models.make_policy_with_base_model(args, make_generative_policy(), tokenizer)
+        ref_policy.requires_grad_(False)
+        ref_policy = accelerator.prepare(ref_policy)  # noqa
 
     reward_model = make_reward_model()
     reward_model.requires_grad_(False)

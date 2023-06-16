@@ -469,6 +469,8 @@ def _make_left_padded_tokenizer(
             cache_dir=cache_dir,
             padding_side="left"
         )
+    elif "rm_combined" in model_name_or_path or "fongsu" in model_name_or_path:
+        tokenizer = transformers.AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-1.3B")
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name_or_path,

@@ -621,7 +621,7 @@ def make_models(
     for name, param in actor_critic.policy.base_model.named_parameters():
         print(name, param.device)
         if param.device != accelerator.device:
-            print("param not on device")
+            print("param not on device, this is unexpected!")
             param.data = param.data.to(accelerator.device)
 
     if args.lora_r > 0:

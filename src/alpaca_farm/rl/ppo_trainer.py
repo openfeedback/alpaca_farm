@@ -42,6 +42,7 @@ from .. import (
     utils,
 )
 from ..models import reward_model as reward_model_module
+from ..models import RewardModelOutput
 from ..models import rl_models
 from ..types import AnyPath, AnyPathOrNone, LRScheduler, Tensor
 from . import rl_trainer
@@ -501,10 +502,6 @@ def make_tokenizer(args):
             "AlpacaFarm does not support different tokenizer for policy and reward" " models."
         )
     return policy_tokenizer
-
-
-class RewardModelOutput(ModelOutput):
-    rewards: Tensor = None
 
 def make_models(
     tokenizer: transformers.PreTrainedTokenizer,

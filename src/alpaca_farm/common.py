@@ -92,6 +92,31 @@ class staggered_object_creation(object):
         return decorator
 
 
+def make_lora_model(language_model, lora_r, lora_alpha, lora_dropout, target_modules):
+    """
+    Given a language model, and lora config, create a lora model.
+    Makes sure the lora layers are also on the correct devices
+    """
+    lora_config = LoraConfig(
+        r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        target_modules=target_modules,
+        task_type="CAUSAL_LM",
+        fan_in_fan_out=False,
+    )
+    language_model = get_peft_model(language_model, lora_config)
+    language_model.print_trainable_parameters()
+    prev_device = None
+    for name, param in language_model.named_parameters():
+        # print device type of later
+        print(name, param.device)
+        if "lora" in name:
+            param.data = param.to(prev_device)
+        prev_device = param.device
+    return language_model
+
+
 def make_generative_lm(
     model_name_or_path: str,
     flash_attn: bool,
@@ -111,6 +136,7 @@ def make_generative_lm(
     try: # try to load a peft model
         peft_config = PeftConfig.from_pretrained(model_name_or_path)
         base_model_path = peft_config.base_model_name_or_path
+        logger.warning("Loaded a peft_config, i.e. the model loaded had a peft config")
     except ValueError:
         base_model_path = model_name_or_path
 
@@ -137,22 +163,12 @@ def make_generative_lm(
 
     if peft_config is not None:
         logger.warning("Loading a peft model")
-        language_model = PeftModel.from_pretrained(language_model, model_name_or_path)
+        language_model = PeftModel.from_pretrained(language_model, model_name_or_path, **kwargs)
     elif lora_r > 0:
         logger.warning("Creating a LoRA model")
-        lora_config = LoraConfig(
-            r=lora_r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            target_modules=target_modules,
-            task_type="CAUSAL_LM",
-            fan_in_fan_out=False,
+        language_model = make_lora_model(
+            language_model, lora_r, lora_alpha, lora_dropout, target_modules
         )
-        language_model = get_peft_model(language_model, lora_config)
-        language_model.print_trainable_parameters()
-        for name, param in language_model.named_parameters():
-            # print device type of later
-            print(name, param.device)
 
     return language_model
 

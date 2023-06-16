@@ -29,6 +29,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from transformers.modeling_utils import unwrap_model
 from peft import get_peft_model, LoraConfig, TaskType
 
+import reward_modelling 
 from superhf.mocking import MockLanguageModel, MockRewardModel
 
 from .. import (
@@ -500,6 +501,9 @@ def make_tokenizer(args):
     return policy_tokenizer
 
 
+class RewardModelOutput(ModelOutput):
+    rewards: Tensor = None
+
 def make_models(
     tokenizer: transformers.PreTrainedTokenizer,
     args: ppo_utils.TrainingArguments,
@@ -525,6 +529,34 @@ def make_models(
         config = None
         if "mock" in args.reward_model_name_or_path:
             config = reward_model_module.RewardConfig(backbone_model_name_or_path=args.reward_model_name_or_path)
+        elif "rm_combined" in args.reward_model_name_or_path or "fongsu" in args.reward_model_name_or_path:
+            """
+            Loads a GPT-neo model that was trained by Oliver.
+            """
+            reward_model = reward_modelling.reward_model.RewardModel.from_pretrained(
+                args.reward_model_name_or_path,
+                low_cpu_mem_usage=True,
+                torch_dtype=torch.bfloat16,  # Force half for these large RMs
+            ).to(accelerator.device)
+            # rename some paramters to match the reward model class
+            # v_head -> reward_head
+            reward_model.reward_head = reward_model.v_head
+            # model -> backbone_model
+            reward_model.backbone_model = reward_model.model
+            # new forward
+            def forward(input_ids, attention_mask=None, return_dict=True, **kwargs):
+                # We only compute the rewards and don't compute the logistic regression loss in this function so that it's
+                # easier to use for later stages of reranking / RL training.
+                outputs = reward_model.backbone_model.model(
+                    input_ids=input_ids, attention_mask=attention_mask, return_dict=True, **kwargs
+                )
+                last_hidden_state = outputs.last_hidden_state
+                last_hidden_state_at_the_end = last_hidden_state[:, -1, :]
+                # TODO(lxuechen): Make returning rewards at all positions and last_hidden_state an option.
+                rewards = reward_model.reward_head(last_hidden_state_at_the_end).squeeze(-1)
+                return RewardModelOutput(rewards=rewards) if return_dict else (rewards,)
+            reward_model.forward = forward
+            return reward_model
         return reward_model_module.RewardModel.from_pretrained(
             args.reward_model_name_or_path,
             config=config,
@@ -559,8 +591,14 @@ def make_models(
         # Initialize value from policy. Works for sanity, but generally performs worse in instruction-following.
         if args.lora_r > 0:
             logger.warning("LORA not supported with init_value_with_policy yet due to bug with value model.")
+            # wrap base model such that it uses a different peft adapter
+            value_model_base_lm = common.make_lora_model(policy.base_model.base_model,
+                                                         args.lora_r,
+                                                         args.lora_alpha,
+                                                         args.lora_dropout,
+                                                         args.target_modules,)
             value_model = rl_models.make_value_with_base_model(
-                args, make_generative_policy(), tokenizer
+                args, value_model_base_lm, tokenizer
             )
         else:
             value_model = rl_models.make_value_with_base_model(
@@ -578,11 +616,11 @@ def make_models(
     #     print(name, param.device)
     actor_critic = accelerator.prepare(actor_critic)  # noqa
     # print("after")
-    # for name, param in actor_critic.policy.base_model.named_parameters():
-    #     print(name, param.device)
-    #     if param.device != accelerator.device:
-    #         print("param not on device")
-    #         param.data = param.data.to(accelerator.device)
+    for name, param in actor_critic.policy.base_model.named_parameters():
+        print(name, param.device)
+        if param.device != accelerator.device:
+            print("param not on device")
+            param.data = param.data.to(accelerator.device)
 
     if args.lora_r > 0:
         ref_policy = None

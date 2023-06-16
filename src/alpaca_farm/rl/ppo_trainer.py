@@ -42,7 +42,6 @@ from .. import (
     utils,
 )
 from ..models import reward_model as reward_model_module
-from ..models import RewardModelOutput
 from ..models import rl_models
 from ..types import AnyPath, AnyPathOrNone, LRScheduler, Tensor
 from . import rl_trainer
@@ -553,7 +552,7 @@ def make_models(
                 last_hidden_state_at_the_end = last_hidden_state[:, -1, :]
                 # TODO(lxuechen): Make returning rewards at all positions and last_hidden_state an option.
                 rewards = reward_model.reward_head(last_hidden_state_at_the_end).squeeze(-1)
-                return RewardModelOutput(rewards=rewards) if return_dict else (rewards,)
+                return reward_model_module.RewardModelOutput(rewards=rewards) if return_dict else (rewards,)
             reward_model.forward = forward
             return reward_model
         return reward_model_module.RewardModel.from_pretrained(

@@ -222,18 +222,19 @@ class PPOTrainer(rl_trainer.RLTrainer):
             )
             rollouts_batch.update(shape_reward_outputs)
 
-            rollouts_batch_cpu = {key: value.cpu() for key, value in rollouts_batch.items()}
-            rollouts.append(rollouts_batch_cpu)
+            rollouts.append(rollouts_batch)
 
         # Items in dict need to be of same shape.
         rollouts = common.merge_dict(rollouts, merge_fn=torch.cat)
         # Estimating advantages outside the loop gives more samples for reward normalization.
         advantages = self._estimate_advantage(
-            rewards=rollouts["shaped_rewards"].to(self.accelerator.device),
-            values=rollouts["values"].to(self.accelerator.device),
+            rewards=rollouts["shaped_rewards"],
+            values=rollouts["values"],
         )
-        advantages = {key: value.cpu() for key, value in advantages.items()}
-        return {**rollouts, **advantages}
+        
+        rollouts_cpu = {key: value.cpu() for key, value in rollouts.items()}
+        advantages_cpu = {key: value.cpu() for key, value in advantages.items()}
+        return {**rollouts_cpu, **advantages_cpu}
 
     def post_reward(
         self, reward_outputs: Dict[str, Tensor], responses: Tensor
